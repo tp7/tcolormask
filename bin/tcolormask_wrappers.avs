@@ -23,7 +23,7 @@ function t_9colormask(clip c, int color1, int "color2", int "color3", int "color
 	c.t_24colormask(color1, color2, color3, color4, color5, color6, color7, color8, color9, tolerance=tolerance, expandblur=expandblur, BT601=BT601, blur=blur)
 }
 
-function t_24colormask(clip c, int color1, int "color2", int "color3", int "color4", int "color5", int "color6", int "color7", int "color8", int "color9", int "color10", int "color11", int "color12", int "tolerance", int "expandblur", bool "BT601", int "blur")
+function t_12colormask(clip c, int color1, int "color2", int "color3", int "color4", int "color5", int "color6", int "color7", int "color8", int "color9", int "color10", int "color11", int "color12", int "tolerance", int "expandblur", bool "BT601", int "blur")
 {
 	c.t_24colormask(color1, color2, color3, color4, color5, color6, color7, color8, color9, color10, color11, color12, tolerance=tolerance, expandblur=expandblur, BT601=BT601, blur=blur)
 }
@@ -85,8 +85,8 @@ function t_24colormask(clip c, int color1, int "color2", int "color3", int "colo
             \ (color24 == -1 ? "" : " " + string(color24))
             
     c.tcolormask(colors_string, tolerance, BT601)
-	expandblur > 0 ? binomialblur(expandblur,u=1,v=1).mt_lut("x 5 *") : last
-	blur == 1 ? removegrain(20, -1) :  \
+    expandblur > 0 ? binomialblur(expandblur,u=1,v=1).mt_lut("x 5 *") : last
+    blur == 1 ? removegrain(20, -1) :  \
         blur>0 ? binomialblur(blur,u=1,v=1) : last
 }
 
@@ -97,8 +97,8 @@ function t_colormask2(clip c, string colors, int "tolerance", bool "BT601", int 
     gray = default(gray, false)
     
     c.tcolormask(colors, tolerance=tolerance, bt601=bt601, lutthr=lutthr, mt=mt )
-	expandblur > 0 ? binomialblur(expandblur,u=1,v=1).mt_lut("x 5 *") : last
-	blur == 1 ? removegrain(20, -1) :  \
+    expandblur > 0 ? binomialblur(expandblur,u=1,v=1).mt_lut("x 5 *") : last
+    blur == 1 ? removegrain(20, -1) :  \
         blur > 0 ? binomialblur(blur,u=1,v=1) : last
     gray ? mt_lut(chroma="128") : last
 }

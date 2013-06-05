@@ -23,7 +23,7 @@ $808080", tolerance=10, bt601=false, gray=false, lutthr=9, mt=true)
 ### Difference ###
 Unlike the old script, this plugin uses a single string to specify all colors and doesn't do any blurring. Wrapper functions are provided for convenience in the **bin/tcolormask_wrappers.avs** script.
 
-Also since we process chroma and luma together to avoid having to merge planes together later, output is not [identical][comparison]. Basically it appears a bit less blurred and doesn't contain any non-binary values produced by chroma resizing. This will not be fixed and there's no workaround. You'll most likely be blurring the output clip anyway. 
+Also since we process chroma and luma together to avoid having to merge planes later, output is not [identical][comparison]. Basically it appears a bit less blurred and doesn't contain any non-binary values produced by chroma resizing. This will not be fixed and there's no workaround. You'll most likely be blurring the output clip anyway. 
 
 ### Performance ###
 This plugin uses direct SIMD computations to do its dirty work. SIMD appears to be faster than LUT for the most common cases, but unfortunately its speed depends on the number of specified colors and at some point it does get slower than LUT. That's why the alternative is also provided. If specified more than *lutthr* (9 by default) colors, the plugin will use the LUT routine to avoid performance degradation.
