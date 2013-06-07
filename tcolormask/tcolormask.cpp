@@ -123,30 +123,27 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
 
    if (mt_) {
        //async seems to be threadpool'ed on windows, creating threads is less efficient
-       auto f1 = std::async(launch::async, [=] { 
+       auto thread2 = std::async(launch::async, [=] { 
            process(dstY_ptr, 
-                   srcY_ptr, 
-                   srcV_ptr, 
-                   srcU_ptr, 
-                   dst_pitch_y, 
-                   src_pitch_y,
-                   src_pitch_uv,
-                   width,
-                   height/2); 
+               srcY_ptr, 
+               srcV_ptr, 
+               srcU_ptr, 
+               dst_pitch_y, 
+               src_pitch_y,
+               src_pitch_uv,
+               width,
+               height/2); 
        });
-       auto f2 = std::async(launch::async, [=] { 
-           process(dstY_ptr + (dst_pitch_y*height/2), 
-                   srcY_ptr + (src_pitch_y*height/2), 
-                   srcV_ptr + (src_pitch_uv*height/4), 
-                   srcU_ptr + (src_pitch_uv*height/4), 
-                   dst_pitch_y, 
-                   src_pitch_y, 
-                   src_pitch_uv, 
-                   width, 
-                   height/2); 
-       });
-       f1.wait();
-       f2.wait();
+       process(dstY_ptr + (dst_pitch_y*height/2), 
+           srcY_ptr + (src_pitch_y*height/2), 
+           srcV_ptr + (src_pitch_uv*height/4), 
+           srcU_ptr + (src_pitch_uv*height/4), 
+           dst_pitch_y, 
+           src_pitch_y, 
+           src_pitch_uv, 
+           width, 
+           height/2); 
+       thread2.wait();
    } else {
        process(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width, height);
    }
