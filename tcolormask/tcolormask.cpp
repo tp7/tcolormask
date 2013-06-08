@@ -62,8 +62,8 @@ TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt60
     for (auto color: colors) {
         YUVPixel p;
         memset(&p, 0, sizeof(p));
-        float r = static_cast<float>(color & 0xFF0000 >> 16) / 255.0f;
-        float g = static_cast<float>(color & 0xFF00 >> 8) / 255.0f;
+        float r = static_cast<float>((color & 0xFF0000) >> 16) / 255.0f;
+        float g = static_cast<float>((color & 0xFF00) >> 8) / 255.0f;
         float b = static_cast<float>(color & 0xFF) / 255.0f;
 
         float y = kR*r + (1-kR-kB)*g + kB*b;
