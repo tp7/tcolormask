@@ -3,7 +3,14 @@
 #include <future>
 #include <Windows.h>
 #pragma warning(disable: 4512 4244 4100)
-#include "avisynth.h"
+#if defined(FILTER_AVS_25)
+#include "avisynth-2_5.h"
+#elif defined(FILTER_AVS_26)
+#include <windows.h>
+#include "avisynth-2_6.h"
+#else
+#error FILTER_AVS_2x not defined
+#endif
 #pragma warning(default: 4512 4244 4100)
 #include <xmmintrin.h>
 
@@ -19,9 +26,98 @@ struct YUVPixel {
     unsigned int vector_v;
 };
 
+
 int round(float d) {
     return static_cast<int>(d + 0.5f);
 }
+
+template<int subsampling>
+void processLut(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *pSrcU, int dstPitchY, int srcPitchY, int srcPitchUV, int width, int height, BYTE *lutY, BYTE *lutU, BYTE *lutV) {
+    for(int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            pDstY[x] = lutY[pSrcY[x]] & lutU[pSrcU[x/subsampling]] & lutV[pSrcV[x/subsampling]];
+        }
+        pSrcY += srcPitchY;
+        if (y % subsampling == (subsampling-1)) {
+            pSrcU += srcPitchUV;
+            pSrcV += srcPitchUV;
+        }
+        pDstY += dstPitchY;
+    }
+}
+
+template<int subsampling>
+void processSse2(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *pSrcU, int dstPitchY, 
+                 int srcPitchY, int srcPitchUV, int width, int height, const vector<YUVPixel>& colors, int vectorTolerance, int halfVectorTolerance) {
+    for(int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; x+=16) {
+            auto result_y = _mm_setzero_si128();
+            auto result_u = _mm_setzero_si128();
+            auto result_v = _mm_setzero_si128();
+
+            auto srcY_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pSrcY+x));
+            __m128i srcU_v, srcV_v;
+            if (subsampling == 2) {
+                srcU_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(pSrcU+x/2));
+                srcU_v = _mm_unpacklo_epi8(srcU_v, srcU_v);
+                srcV_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(pSrcV+x/2));
+                srcV_v = _mm_unpacklo_epi8(srcV_v, srcV_v);
+            } else {
+                srcU_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pSrcU+x));
+                srcV_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pSrcV+x));
+            }
+
+            for(auto &color: colors) {
+                auto colorVector_y = _mm_set1_epi32(color.vector_y);
+                auto colorVector_u = _mm_set1_epi32(color.vector_u);
+                auto colorVector_v = _mm_set1_epi32(color.vector_v);
+                /* absolute difference */
+                auto maximum_y = _mm_max_epu8(srcY_v, colorVector_y);
+                auto maximum_u = _mm_max_epu8(srcU_v, colorVector_u);
+                auto maximum_v = _mm_max_epu8(srcV_v, colorVector_v);
+
+                auto minimum_y = _mm_min_epu8(srcY_v, colorVector_y);
+                auto minimum_u = _mm_min_epu8(srcU_v, colorVector_u);
+                auto minimum_v = _mm_min_epu8(srcV_v, colorVector_v);
+
+                auto diff_y = _mm_subs_epu8(maximum_y, minimum_y);
+                auto diff_u = _mm_subs_epu8(maximum_u, minimum_u);
+                auto diff_v = _mm_subs_epu8(maximum_v, minimum_v);
+                /* comparing to tolerance */
+                auto diff_tolerance_min_y = _mm_max_epu8(diff_y, _mm_set1_epi32(vectorTolerance));
+                auto diff_tolerance_min_u = _mm_max_epu8(diff_u, _mm_set1_epi32(halfVectorTolerance));
+                auto diff_tolerance_min_v = _mm_max_epu8(diff_v, _mm_set1_epi32(halfVectorTolerance));
+
+                auto passed_y = _mm_cmpeq_epi8(diff_y, diff_tolerance_min_y);
+                auto passed_u = _mm_cmpeq_epi8(diff_u, diff_tolerance_min_u);
+                auto passed_v = _mm_cmpeq_epi8(diff_v, diff_tolerance_min_v);
+                /* inverting to get "lower" instead of "lower or equal" */
+                passed_y = _mm_andnot_si128(passed_y, _mm_set1_epi32(0xFFFFFFFF));
+                passed_u = _mm_andnot_si128(passed_u, _mm_set1_epi32(0xFFFFFFFF));
+                passed_v = _mm_andnot_si128(passed_v, _mm_set1_epi32(0xFFFFFFFF));
+
+                result_y = _mm_or_si128(result_y, passed_y);
+                result_u = _mm_or_si128(result_u, passed_u);
+                result_v = _mm_or_si128(result_v, passed_v);
+            }
+            result_y = _mm_and_si128(result_y, result_u);
+            result_y = _mm_and_si128(result_y, result_v);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(pDstY+x), result_y);
+        }
+        pSrcY += srcPitchY;
+        if (y % subsampling == (subsampling-1)) {
+            pSrcU += srcPitchUV;
+            pSrcV += srcPitchUV;
+        }
+        pDstY += dstPitchY;
+    }
+}
+
+
+auto lutYv12 = &processLut<2>;
+auto lutYv24 = &processLut<1>;
+auto sse2Yv12 = &processSse2<2>;
+auto sse2Yv24 = &processSse2<1>;
 
 class TColorMask : public GenericVideoFilter {
 public:
@@ -30,31 +126,52 @@ public:
 
 
 private:
+    void buildLuts();
+
+
+    void process(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
+
     vector<YUVPixel> colors_;
     int tolerance_;
     bool grayscale_;
     bool mt_;
     int prefer_lut_thresh_;
+    int subsampling_;
     unsigned int vector_tolerance_;
     unsigned int vector_half_tolerance_;
 
     BYTE lut_y[256];
     BYTE lut_u[256];
     BYTE lut_v[256];
-
-    void buildLuts();
-    void processSse2(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
-    void processLut(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
-    void process(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
+    
+    decltype(lutYv12) lutFunction_;
+    decltype(sse2Yv12) sse2Function_;
 };
 
 TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env) 
     : GenericVideoFilter(child), tolerance_(tolerance), grayscale_(grayscale), prefer_lut_thresh_(lutthr), mt_(mt), vector_tolerance_(0), vector_half_tolerance_(0) {
 
-    if (!child->GetVideoInfo().IsYV12()) {
+#if defined(FILTER_AVS_25)
+    if (vi.pixel_type != VideoInfo::CS_YV12) {
         env->ThrowError("Only YV12 is supported!");
     }
-
+    subsampling_ = 2;
+    lutFunction_ = lutYv12;
+    sse2Function_ = sse2Yv12;
+#else
+    if (vi.pixel_type != VideoInfo::CS_YV12 && vi.pixel_type != VideoInfo::CS_YV24) {
+        env->ThrowError("Only YV12 and YV24 are supported!");
+    }
+    if (vi.pixel_type == VideoInfo::CS_YV24) {
+        subsampling_ = 1;
+        lutFunction_ = lutYv24;
+        sse2Function_ = sse2Yv24;
+    } else {
+        subsampling_ = 2;
+        lutFunction_ = lutYv12;
+        sse2Function_ = sse2Yv12;
+    }
+#endif
     float kR = bt601 ? 0.299f : 0.2126f;
     float kB = bt601 ? 0.114f : 0.0722f;
 
@@ -119,7 +236,7 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
    
    BYTE *dstY_ptr = dst->GetWritePtr(PLANAR_Y);
    int dst_pitch_y = dst->GetPitch(PLANAR_Y);
-
+   
    if (mt_) {
        //async seems to be threadpool'ed on windows, creating threads is less efficient
        auto thread2 = std::async(launch::async, [=] { 
@@ -135,8 +252,8 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
        });
        process(dstY_ptr + (dst_pitch_y*height/2), 
            srcY_ptr + (src_pitch_y*height/2), 
-           srcV_ptr + (src_pitch_uv*height/4), 
-           srcU_ptr + (src_pitch_uv*height/4), 
+           srcV_ptr + (src_pitch_uv*height/(2*subsampling_)), 
+           srcU_ptr + (src_pitch_uv*height/(2*subsampling_)), 
            dst_pitch_y, 
            src_pitch_y, 
            src_pitch_uv, 
@@ -156,87 +273,14 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
 
 void TColorMask::process(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height) {
     if (colors_.size() > prefer_lut_thresh_) {
-        processLut(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width, height);
+        lutFunction_(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width, height, lut_y, lut_u, lut_v);
         return;
     }
     int border = width % 16;
 
-    processSse2(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width - border , height);
+    sse2Function_(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width - border , height, colors_, vector_tolerance_, vector_half_tolerance_);
     if (border != 0) {
-        processLut(dstY_ptr + width - border, srcY_ptr + width - border, srcV_ptr + width - border, srcU_ptr + width - border, dst_pitch_y, src_pitch_y, src_pitch_uv, border, height);
-    }
-}
-
-void TColorMask::processLut(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height) {
-    for(int y = 0; y < height; ++y) {
-         for (int x = 0; x < width; ++x) {
-             dstY_ptr[x] = lut_y[srcY_ptr[x]] & lut_u[srcU_ptr[x/2]] & lut_v[srcV_ptr[x/2]];
-         }
-         srcY_ptr += src_pitch_y;
-         if (y % 2 == 1) {
-             srcU_ptr += src_pitch_uv;
-             srcV_ptr += src_pitch_uv;
-         }
-         dstY_ptr += dst_pitch_y;
-    }
-}
-
-void TColorMask::processSse2(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height) {
-    for(int y = 0; y < height; ++y) {
-        for (int x = 0; x < width / 16; ++x) {
-            auto result_y = _mm_setzero_si128();
-            auto result_u = _mm_setzero_si128();
-            auto result_v = _mm_setzero_si128();
-
-            auto srcY_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcY_ptr+x*16));
-            auto srcU_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcU_ptr+x*8));
-            srcU_v = _mm_unpacklo_epi8(srcU_v, srcU_v);
-            auto srcV_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcV_ptr+x*8));
-            srcV_v = _mm_unpacklo_epi8(srcV_v, srcV_v);
-
-            for(auto &color: colors_) {
-                auto colorVector_y = _mm_set1_epi32(color.vector_y);
-                auto colorVector_u = _mm_set1_epi32(color.vector_u);
-                auto colorVector_v = _mm_set1_epi32(color.vector_v);
-                /* absolute difference */
-                auto maximum_y = _mm_max_epu8(srcY_v, colorVector_y);
-                auto maximum_u = _mm_max_epu8(srcU_v, colorVector_u);
-                auto maximum_v = _mm_max_epu8(srcV_v, colorVector_v);
-
-                auto minimum_y = _mm_min_epu8(srcY_v, colorVector_y);
-                auto minimum_u = _mm_min_epu8(srcU_v, colorVector_u);
-                auto minimum_v = _mm_min_epu8(srcV_v, colorVector_v);
-
-                auto diff_y = _mm_subs_epu8(maximum_y, minimum_y);
-                auto diff_u = _mm_subs_epu8(maximum_u, minimum_u);
-                auto diff_v = _mm_subs_epu8(maximum_v, minimum_v);
-                /* comparing to tolerance */
-                auto diff_tolerance_min_y = _mm_max_epu8(diff_y, _mm_set1_epi32(vector_tolerance_));
-                auto diff_tolerance_min_u = _mm_max_epu8(diff_u, _mm_set1_epi32(vector_half_tolerance_));
-                auto diff_tolerance_min_v = _mm_max_epu8(diff_v, _mm_set1_epi32(vector_half_tolerance_));
-
-                auto passed_y = _mm_cmpeq_epi8(diff_y, diff_tolerance_min_y);
-                auto passed_u = _mm_cmpeq_epi8(diff_u, diff_tolerance_min_u);
-                auto passed_v = _mm_cmpeq_epi8(diff_v, diff_tolerance_min_v);
-                /* inverting to get "lower" instead of "lower or equal" */
-                passed_y = _mm_andnot_si128(passed_y, _mm_set1_epi32(0xFFFFFFFF));
-                passed_u = _mm_andnot_si128(passed_u, _mm_set1_epi32(0xFFFFFFFF));
-                passed_v = _mm_andnot_si128(passed_v, _mm_set1_epi32(0xFFFFFFFF));
-
-                result_y = _mm_or_si128(result_y, passed_y);
-                result_u = _mm_or_si128(result_u, passed_u);
-                result_v = _mm_or_si128(result_v, passed_v);
-            }
-            result_y = _mm_and_si128(result_y, result_u);
-            result_y = _mm_and_si128(result_y, result_v);
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(dstY_ptr+x*16), result_y);
-        }
-        srcY_ptr += src_pitch_y;
-        if (y % 2 == 1) {
-            srcU_ptr += src_pitch_uv;
-            srcV_ptr += src_pitch_uv;
-        }
-        dstY_ptr += dst_pitch_y;
+        lutFunction_(dstY_ptr + width - border, srcY_ptr + width - border, srcV_ptr + width - border, srcU_ptr + width - border, dst_pitch_y, src_pitch_y, src_pitch_uv, border, height, lut_y, lut_u, lut_v);
     }
 }
 
