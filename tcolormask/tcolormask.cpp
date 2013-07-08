@@ -1,5 +1,4 @@
 #include <vector>
-#include <sstream>
 #include <regex>
 #include <future>
 #include <Windows.h>
@@ -241,18 +240,12 @@ void TColorMask::processSse2(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *s
     }
 }
 
-unsigned int hexToInt(const string &str) {
-    unsigned int x;   
-    std::stringstream ss;
-    ss << std::hex << str;
-    ss >> x;
-    return x;
-}
-
 int avisynthStringToInt(const string &str) {
-    return str[0] == '$' 
-        ? hexToInt(str.substr(1, str.length())) 
-        : stoi(str);
+    if (str[0] == '$') {
+        auto substr = str.substr(1, str.length());
+        return strtol(substr.c_str(), 0, 16);
+    }
+    return strtol(str.c_str(), 0, 10);
 }
 
 AVSValue __cdecl CreateTColorMask(AVSValue args, void*, IScriptEnvironment* env) 
