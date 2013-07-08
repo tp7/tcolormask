@@ -3,14 +3,7 @@
 #include <future>
 #include <Windows.h>
 #pragma warning(disable: 4512 4244 4100)
-#if defined(FILTER_AVS_25)
-#include "avisynth-2_5.h"
-#elif defined(FILTER_AVS_26)
-#include <windows.h>
-#include "avisynth-2_6.h"
-#else
-#error FILTER_AVS_2x not defined
-#endif
+#include "avisynth.h"
 #pragma warning(default: 4512 4244 4100)
 #include <xmmintrin.h>
 
@@ -150,28 +143,17 @@ private:
 
 TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env) 
     : GenericVideoFilter(child), tolerance_(tolerance), grayscale_(grayscale), prefer_lut_thresh_(lutthr), mt_(mt), vector_tolerance_(0), vector_half_tolerance_(0) {
-
-#if defined(FILTER_AVS_25)
-    if (vi.pixel_type != VideoInfo::CS_YV12) {
-        env->ThrowError("Only YV12 is supported!");
-    }
-    subsampling_ = 2;
-    lutFunction_ = lutYv12;
-    sse2Function_ = sse2Yv12;
-#else
-    if (vi.pixel_type != VideoInfo::CS_YV12 && vi.pixel_type != VideoInfo::CS_YV24) {
-        env->ThrowError("Only YV12 and YV24 are supported!");
-    }
-    if (vi.pixel_type == VideoInfo::CS_YV24) {
+    if (vi.IsYV24()) {
         subsampling_ = 1;
         lutFunction_ = lutYv24;
         sse2Function_ = sse2Yv24;
-    } else {
+    } else if (vi.IsYV12()) {
         subsampling_ = 2;
         lutFunction_ = lutYv12;
         sse2Function_ = sse2Yv12;
+    } else {
+        env->ThrowError("Only YV12 and YV24 are supported!");
     }
-#endif
     float kR = bt601 ? 0.299f : 0.2126f;
     float kB = bt601 ? 0.114f : 0.0722f;
 

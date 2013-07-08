@@ -39,17 +39,27 @@
 #ifndef __AVISYNTH_H__
 #define __AVISYNTH_H__
 
-enum { AVISYNTH_INTERFACE_VERSION = 2 };
+enum { AVISYNTH_INTERFACE_VERSION = 3 };
 
 
 /* Define all types necessary for interfacing with avisynth.dll
    Moved from internal.h */
 
-// Win32 API macros, notably the types BYTE, DWORD, ULONG, etc. 
-#include <windows.h>  
+// Win32 API macros, notably the types BYTE, DWORD, ULONG, etc.
+#include <windef.h>
+
+#if (_MSC_VER >= 1400)
+extern "C" LONG __cdecl _InterlockedIncrement(LONG volatile * pn);
+extern "C" LONG __cdecl _InterlockedDecrement(LONG volatile * pn);
+#pragma intrinsic(_InterlockedIncrement)
+#pragma intrinsic(_InterlockedDecrement)
+#define InterlockedIncrement _InterlockedIncrement
+#define InterlockedDecrement _InterlockedDecrement
+#endif
 
 // COM interface macros
 #include <objbase.h>
+
 
 // Raster types used by VirtualDub & Avisynth
 #define in64 (__int64)(unsigned short)
@@ -57,8 +67,8 @@ typedef unsigned long	Pixel;    // this will break on 64-bit machines!
 typedef unsigned long	Pixel32;
 typedef unsigned char	Pixel8;
 typedef long			PixCoord;
-typedef	long			PixDim;
-typedef	long			PixOffset;
+typedef long			PixDim;
+typedef long			PixOffset;
 
 
 /* Compiler-specific crap */
@@ -78,7 +88,7 @@ typedef	long			PixOffset;
   #define _RPT2(a,b,c,d) ((void)0)
   #define _RPT3(a,b,c,d,e) ((void)0)
   #define _RPT4(a,b,c,d,e,f) ((void)0)
-  
+
   #define _ASSERTE(x) assert(x)
   #include <assert.h>
 #endif
@@ -100,10 +110,10 @@ typedef	long			PixOffset;
 typedef float SFLOAT;
 
 enum {SAMPLE_INT8  = 1<<0,
-        SAMPLE_INT16 = 1<<1, 
-        SAMPLE_INT24 = 1<<2,    // Int24 is a very stupid thing to code, but it's supported by some hardware.
-        SAMPLE_INT32 = 1<<3,
-        SAMPLE_FLOAT = 1<<4};
+      SAMPLE_INT16 = 1<<1,
+      SAMPLE_INT24 = 1<<2,    // Int24 is a very stupid thing to code, but it's supported by some hardware.
+      SAMPLE_INT32 = 1<<3,
+      SAMPLE_FLOAT = 1<<4};
 
 enum {
    PLANAR_Y=1<<0,
@@ -113,7 +123,23 @@ enum {
    PLANAR_Y_ALIGNED=PLANAR_Y|PLANAR_ALIGNED,
    PLANAR_U_ALIGNED=PLANAR_U|PLANAR_ALIGNED,
    PLANAR_V_ALIGNED=PLANAR_V|PLANAR_ALIGNED,
+//#* LDS: added from 2.6.0 headers
+   PLANAR_A=1<<4,
+   PLANAR_R=1<<5,
+   PLANAR_G=1<<6,
+   PLANAR_B=1<<7,
+   PLANAR_A_ALIGNED=PLANAR_A|PLANAR_ALIGNED,
+   PLANAR_R_ALIGNED=PLANAR_R|PLANAR_ALIGNED,
+   PLANAR_G_ALIGNED=PLANAR_G|PLANAR_ALIGNED,
+   PLANAR_B_ALIGNED=PLANAR_B|PLANAR_ALIGNED,
+//#* LDS: end of addition
   };
+
+class AvisynthError /* exception */ {
+public:
+  const char* const msg;
+  AvisynthError(const char* _msg) : msg(_msg) {}
+};
 
 struct VideoInfo {
   int width, height;    // width=0 means no video
@@ -123,23 +149,74 @@ struct VideoInfo {
 
   // Colorspace properties.
   enum {
-    CS_BGR = 1<<28,  
+    CS_BGR = 1<<28,
     CS_YUV = 1<<29,
     CS_INTERLEAVED = 1<<30,
     CS_PLANAR = 1<<31
-  };
+
+//#* LDS: added from 2.6.0 headers
+    ,
+    CS_Shift_Sub_Width   =  0,
+    CS_Shift_Sub_Height  =  8,
+    CS_Shift_Sample_Bits = 16,
+
+    CS_Sub_Width_Mask    = 7 << CS_Shift_Sub_Width,
+    CS_Sub_Width_1       = 3 << CS_Shift_Sub_Width, // YV24
+    CS_Sub_Width_2       = 0 << CS_Shift_Sub_Width, // YV12, I420, YV16
+    CS_Sub_Width_4       = 1 << CS_Shift_Sub_Width, // YUV9, YV411
+
+    CS_VPlaneFirst       = 1 << 3, // YV12, YV16, YV24, YV411, YUV9
+    CS_UPlaneFirst       = 1 << 4, // I420
+
+    CS_Sub_Height_Mask   = 7 << CS_Shift_Sub_Height,
+    CS_Sub_Height_1      = 3 << CS_Shift_Sub_Height, // YV16, YV24, YV411
+    CS_Sub_Height_2      = 0 << CS_Shift_Sub_Height, // YV12, I420
+    CS_Sub_Height_4      = 1 << CS_Shift_Sub_Height, // YUV9
+
+    CS_Sample_Bits_Mask  = 7 << CS_Shift_Sample_Bits,
+    CS_Sample_Bits_8     = 0 << CS_Shift_Sample_Bits,
+    CS_Sample_Bits_16    = 1 << CS_Shift_Sample_Bits,
+    CS_Sample_Bits_32    = 2 << CS_Shift_Sample_Bits,
+
+    CS_PLANAR_MASK       = CS_PLANAR | CS_INTERLEAVED | CS_YUV | CS_BGR | CS_Sample_Bits_Mask | CS_Sub_Height_Mask | CS_Sub_Width_Mask,
+    CS_PLANAR_FILTER     = ~( CS_VPlaneFirst | CS_UPlaneFirst ),
 
   // Specific colorformats
-  enum { CS_UNKNOWN = 0,
-         CS_BGR24 = 1<<0 | CS_BGR | CS_INTERLEAVED,
-         CS_BGR32 = 1<<1 | CS_BGR | CS_INTERLEAVED,
-         CS_YUY2 = 1<<2 | CS_YUV | CS_INTERLEAVED,
-         CS_YV12 = 1<<3 | CS_YUV | CS_PLANAR,  // y-v-u, planar
-         CS_I420 = 1<<4 | CS_YUV | CS_PLANAR,  // y-u-v, planar
-         CS_IYUV = 1<<4 | CS_YUV | CS_PLANAR  // same as above
-         };
+    CS_UNKNOWN = 0,
+    CS_BGR24 = 1<<0 | CS_BGR | CS_INTERLEAVED,
+    CS_BGR32 = 1<<1 | CS_BGR | CS_INTERLEAVED,
+    CS_YUY2  = 1<<2 | CS_YUV | CS_INTERLEAVED,
+//  CS_YV12  = 1<<3  Reserved
+//  CS_I420  = 1<<4  Reserved
+    CS_RAW32 = 1<<5 | CS_INTERLEAVED,
+
+//  YV12 must be 0xA000008 2.5 Baked API will see all new planar as YV12
+//  I420 must be 0xA000010
+
+    CS_YV24  = CS_PLANAR | CS_YUV | CS_Sample_Bits_8 | CS_VPlaneFirst | CS_Sub_Height_1 | CS_Sub_Width_1,  // YUV 4:4:4 planar
+    CS_YV16  = CS_PLANAR | CS_YUV | CS_Sample_Bits_8 | CS_VPlaneFirst | CS_Sub_Height_1 | CS_Sub_Width_2,  // YUV 4:2:2 planar
+    CS_YV12  = CS_PLANAR | CS_YUV | CS_Sample_Bits_8 | CS_VPlaneFirst | CS_Sub_Height_2 | CS_Sub_Width_2,  // y-v-u, 4:2:0 planar
+    CS_I420  = CS_PLANAR | CS_YUV | CS_Sample_Bits_8 | CS_UPlaneFirst | CS_Sub_Height_2 | CS_Sub_Width_2,  // y-u-v, 4:2:0 planar
+    CS_IYUV  = CS_I420,
+    CS_YUV9  = CS_PLANAR | CS_YUV | CS_Sample_Bits_8 | CS_VPlaneFirst | CS_Sub_Height_4 | CS_Sub_Width_4,  // YUV 4:1:0 planar
+    CS_YV411 = CS_PLANAR | CS_YUV | CS_Sample_Bits_8 | CS_VPlaneFirst | CS_Sub_Height_1 | CS_Sub_Width_4,  // YUV 4:1:1 planar
+
+    CS_Y8    = CS_PLANAR | CS_INTERLEAVED | CS_YUV | CS_Sample_Bits_8,                                     // Y   4:0:0 planar
+/*
+    CS_YV48  = CS_PLANAR | CS_YUV | CS_Sample_Bits_16 | CS_VPlaneFirst | CS_Sub_Height_1 | CS_Sub_Width_1, // YUV 4:4:4 16bit samples
+    CS_Y16   = CS_PLANAR | CS_INTERLEAVED | CS_YUV | CS_Sample_Bits_16,                                    // Y   4:0:0 16bit samples
+
+    CS_YV96  = CS_PLANAR | CS_YUV | CS_Sample_Bits_32 | CS_VPlaneFirst | CS_Sub_Height_1 | CS_Sub_Width_1, // YUV 4:4:4 32bit samples
+    CS_Y32   = CS_PLANAR | CS_INTERLEAVED | CS_YUV | CS_Sample_Bits_32,                                    // Y   4:0:0 32bit samples
+
+    CS_PRGB  = CS_PLANAR | CS_RGB | CS_Sample_Bits_8,                                                      // Planar RGB
+    CS_RGB48 = CS_PLANAR | CS_RGB | CS_Sample_Bits_16,                                                     // Planar RGB 16bit samples
+    CS_RGB96 = CS_PLANAR | CS_RGB | CS_Sample_Bits_32,                                                     // Planar RGB 32bit samples
+*/
+//#* LDS: end of addition
+  };
   int pixel_type;                // changed to int as of 2.5
-  
+
 
   int audio_samples_per_second;   // 0 means no audio
   int sample_type;                // as of 2.5
@@ -156,6 +233,16 @@ struct VideoInfo {
     IT_FIELDBASED = 1<<2
   };
 
+//#* LDS: added from 2.6.0 headers
+  // Chroma placement bits 20 -> 23  ::FIXME:: Really want a Class to support this
+  enum {
+    CS_UNKNOWN_CHROMA_PLACEMENT = 0 << 20,
+    CS_MPEG1_CHROMA_PLACEMENT   = 1 << 20,
+    CS_MPEG2_CHROMA_PLACEMENT   = 2 << 20,
+    CS_YUY2_CHROMA_PLACEMENT    = 3 << 20,
+    CS_TOPLEFT_CHROMA_PLACEMENT = 4 << 20
+  };
+
   // useful functions of the above
   bool HasVideo() const { return (width!=0); }
   bool HasAudio() const { return (audio_samples_per_second!=0); }
@@ -163,48 +250,103 @@ struct VideoInfo {
   bool IsRGB24() const { return (pixel_type&CS_BGR24)==CS_BGR24; } // Clear out additional properties
   bool IsRGB32() const { return (pixel_type & CS_BGR32) == CS_BGR32 ; }
   bool IsYUV() const { return !!(pixel_type&CS_YUV ); }
-  bool IsYUY2() const { return (pixel_type & CS_YUY2) == CS_YUY2; }  
-  bool IsYV12() const { return ((pixel_type & CS_YV12) == CS_YV12)||((pixel_type & CS_I420) == CS_I420); }
-  bool IsColorSpace(int c_space) const { return ((pixel_type & c_space) == c_space); }
+  bool IsYUY2() const { return (pixel_type & CS_YUY2) == CS_YUY2; }
+  
+  bool IsYV24()  const { return (pixel_type & CS_PLANAR_MASK) == (CS_YV24  & CS_PLANAR_FILTER); }
+  bool IsYV16()  const { return (pixel_type & CS_PLANAR_MASK) == (CS_YV16  & CS_PLANAR_FILTER); }
+  bool IsYV12()  const { return (pixel_type & CS_PLANAR_MASK) == (CS_YV12  & CS_PLANAR_FILTER); }
+  bool IsY8()    const { return (pixel_type & CS_PLANAR_MASK) == (CS_Y8    & CS_PLANAR_FILTER); }
+
+  bool IsYV411() const { return (pixel_type & CS_PLANAR_MASK) == (CS_YV411 & CS_PLANAR_FILTER); }
+//bool IsYUV9()  const { return (pixel_type & CS_PLANAR_MASK) == (CS_YUV9  & CS_PLANAR_FILTER); }
+
+  bool IsColorSpace(int c_space) const {
+    return IsPlanar() ? ((pixel_type & CS_PLANAR_MASK) == (c_space & CS_PLANAR_FILTER)) : ((pixel_type & c_space) == c_space);
+  }
   bool Is(int property) const { return ((pixel_type & property)==property ); }
+//#* LDS: end of addition
+
   bool IsPlanar() const { return !!(pixel_type & CS_PLANAR); }
   bool IsFieldBased() const { return !!(image_type & IT_FIELDBASED); }
-  bool IsParityKnown() const { return ((image_type & IT_FIELDBASED)&&(image_type & (IT_BFF||IT_TFF))); }
+  bool IsParityKnown() const { return ((image_type & IT_FIELDBASED)&&(image_type & (IT_BFF|IT_TFF))); }
   bool IsBFF() const { return !!(image_type & IT_BFF); }
   bool IsTFF() const { return !!(image_type & IT_TFF); }
-  
-  bool IsVPlaneFirst() const {return ((pixel_type & CS_YV12) == CS_YV12); }  // Don't use this 
+
+  bool IsVPlaneFirst() const {return ((pixel_type & CS_YV12) == CS_YV12); }  // Don't use this
   int BytesFromPixels(int pixels) const { return pixels * (BitsPerPixel()>>3); }   // Will not work on planar images, but will return only luma planes
   int RowSize() const { return BytesFromPixels(width); }  // Also only returns first plane on planar images
   int BMPSize() const { if (IsPlanar()) {int p = height * ((RowSize()+3) & ~3); p+=p>>1; return p;  } return height * ((RowSize()+3) & ~3); }
-  __int64 AudioSamplesFromFrames(__int64 frames) const { return ((__int64)(frames) * audio_samples_per_second * fps_denominator / fps_numerator); }
-  int FramesFromAudioSamples(__int64 samples) const { return (int)(samples * (__int64)fps_numerator / (__int64)fps_denominator / (__int64)audio_samples_per_second); }
-  __int64 AudioSamplesFromBytes(__int64 bytes) const { return bytes / BytesPerAudioSample(); }
+  __int64 AudioSamplesFromFrames(__int64 frames) const { return (fps_numerator && HasVideo()) ? ((__int64)(frames) * audio_samples_per_second * fps_denominator / fps_numerator) : 0; }
+  int FramesFromAudioSamples(__int64 samples) const { return (fps_denominator && HasAudio()) ? (int)((samples * (__int64)fps_numerator)/((__int64)fps_denominator * (__int64)audio_samples_per_second)) : 0; }
+  __int64 AudioSamplesFromBytes(__int64 bytes) const { return HasAudio() ? bytes / BytesPerAudioSample() : 0; }
   __int64 BytesFromAudioSamples(__int64 samples) const { return samples * BytesPerAudioSample(); }
-  int AudioChannels() const { return nchannels; }
+  int AudioChannels() const { return HasAudio() ? nchannels : 0; }
   int SampleType() const{ return sample_type;}
+  bool IsSampleType(int testtype) const{ return !!(sample_type&testtype);}
   int SamplesPerSecond() const { return audio_samples_per_second; }
   int BytesPerAudioSample() const { return nchannels*BytesPerChannelSample();}
   void SetFieldBased(bool isfieldbased)  { if (isfieldbased) image_type|=IT_FIELDBASED; else  image_type&=~IT_FIELDBASED; }
   void Set(int property)  { image_type|=property; }
   void Clear(int property)  { image_type&=~property; }
 
-  int BitsPerPixel() const { 
-    switch (pixel_type) {
-      case CS_BGR24:
-        return 24;
-      case CS_BGR32:
-        return 32;
-      case CS_YUY2:
-        return 16;
-      case CS_YV12:
-      case CS_I420:
-        return 12;
-      default:
-        return 0;
+//#* LDS: added from 2.6.0
+  int GetPlaneWidthSubsampling(int plane) const {  // Subsampling in bitshifts!
+    if (plane == PLANAR_Y)  // No subsampling
+      return 0;
+    if (IsY8())
+      throw AvisynthError("Filter error: GetPlaneWidthSubsampling not available on Y8 pixel type.");
+    if (plane == PLANAR_U || plane == PLANAR_V) {
+      if (IsYUY2())
+        return 1;
+      else if (IsPlanar())
+        return ((pixel_type>>CS_Shift_Sub_Width)+1) & 3;
+      else
+        throw AvisynthError("Filter error: GetPlaneWidthSubsampling called with unsupported pixel type.");
     }
+    throw AvisynthError("Filter error: GetPlaneWidthSubsampling called with unsupported plane.");
   }
-  int BytesPerChannelSample() const { 
+
+  int GetPlaneHeightSubsampling(int plane) const {  // Subsampling in bitshifts!
+    if (plane == PLANAR_Y)  // No subsampling
+      return 0;
+    if (IsY8())
+      throw AvisynthError("Filter error: GetPlaneHeightSubsampling not available on Y8 pixel type.");
+    if (plane == PLANAR_U || plane == PLANAR_V) {
+      if (IsYUY2())
+        return 0;
+      else if (IsPlanar())
+        return ((pixel_type>>CS_Shift_Sub_Height)+1) & 3;
+      else
+        throw AvisynthError("Filter error: GetPlaneHeightSubsampling called with unsupported pixel type.");
+    }
+    throw AvisynthError("Filter error: GetPlaneHeightSubsampling called with unsupported plane.");
+  }
+
+  int BitsPerPixel() const {
+  // Lookup Interleaved, calculate PLANAR's
+      switch (pixel_type) {
+        case CS_BGR24:
+          return 24;
+        case CS_BGR32:
+          return 32;
+        case CS_YUY2:
+          return 16;
+        case CS_Y8:
+          return 8;
+  //    case CS_Y16:
+  //      return 16;
+  //    case CS_Y32:
+  //      return 32;
+    }
+    if (IsPlanar()) {
+      const int S = IsYUV() ? GetPlaneWidthSubsampling(PLANAR_U) + GetPlaneHeightSubsampling(PLANAR_U) : 0;
+      return ( ((1<<S)+2) * (8<<((pixel_type>>CS_Shift_Sample_Bits) & 3)) ) >> S;
+    }
+    return 0;
+  }
+//#* LDS: end of addition
+
+  int BytesPerChannelSample() const {
     switch (sample_type) {
     case SAMPLE_INT8:
       return sizeof(signed char);
@@ -224,15 +366,51 @@ struct VideoInfo {
 
   // useful mutator
   void SetFPS(unsigned numerator, unsigned denominator) {
-    unsigned x=numerator, y=denominator;
-    while (y) {   // find gcd
-      unsigned t = x%y; x = y; y = t;
-    }
-    fps_numerator = numerator/x;
-    fps_denominator = denominator/x;
+	if ((numerator == 0) || (denominator == 0)) {
+	  fps_numerator = 0;
+	  fps_denominator = 1;
+	}
+	else {
+	  unsigned x=numerator, y=denominator;
+	  while (y) {   // find gcd
+		unsigned t = x%y; x = y; y = t;
+	  }
+	  fps_numerator = numerator/x;
+	  fps_denominator = denominator/x;
+	}
   }
+
+  // Range protected multiply-divide of FPS
+  void MulDivFPS(unsigned multiplier, unsigned divisor) {
+	unsigned __int64 numerator   = UInt32x32To64(fps_numerator,   multiplier);
+	unsigned __int64 denominator = UInt32x32To64(fps_denominator, divisor);
+
+	unsigned __int64 x=numerator, y=denominator;
+	while (y) {   // find gcd
+	  unsigned __int64 t = x%y; x = y; y = t;
+	}
+	numerator   /= x; // normalize
+	denominator /= x;
+
+	unsigned __int64 temp = numerator | denominator; // Just looking top bit
+	unsigned u = 0;
+	while (temp & 0xffffffff80000000ull) { // or perhaps > 16777216*2
+	  temp = Int64ShrlMod32(temp, 1);
+	  u++;
+	}
+	if (u) { // Scale to fit
+	  const unsigned round = 1 << (u-1);
+	  SetFPS( (unsigned)Int64ShrlMod32(numerator   + round, u),
+	          (unsigned)Int64ShrlMod32(denominator + round, u) );
+	}
+	else {
+	  fps_numerator   = (unsigned)numerator;
+	  fps_denominator = (unsigned)denominator;
+	}
+  }
+
   // Test for same colorspace
-  bool IsSameColorspace(const VideoInfo& vi) {
+  bool IsSameColorspace(const VideoInfo& vi) const {
     if (vi.pixel_type == pixel_type) return TRUE;
     if (IsYV12() && vi.IsYV12()) return TRUE;
     return FALSE;
@@ -240,24 +418,6 @@ struct VideoInfo {
 
 };
 
-enum {
-  FILTER_TYPE=1,
-  FILTER_INPUT_COLORSPACE=2,
-  FILTER_OUTPUT_TYPE=9,
-  FILTER_NAME=4,
-  FILTER_AUTHOR=5,
-  FILTER_VERSION=6,
-  FILTER_ARGS=7,
-  FILTER_ARGS_INFO=8,
-  FILTER_ARGS_DESCRIPTION=10,
-  FILTER_DESCRIPTION=11,
-};
-enum {  //SUBTYPES
-  FILTER_TYPE_AUDIO=1,
-  FILTER_TYPE_VIDEO=2,
-  FILTER_OUTPUT_TYPE_SAME=3,
-  FILTER_OUTPUT_TYPE_DIFFERENT=4,
-};
 
 
 
@@ -272,12 +432,13 @@ class VideoFrameBuffer {
   const int data_size;
   // sequence_number is incremented every time the buffer is changed, so
   // that stale views can tell they're no longer valid.
-  long sequence_number;
+  volatile long sequence_number;
 
   friend class VideoFrame;
   friend class Cache;
+  friend class CacheMT;
   friend class ScriptEnvironment;
-  long refcount;
+  volatile long refcount;
 
 public:
   VideoFrameBuffer(int size);
@@ -285,7 +446,7 @@ public:
   ~VideoFrameBuffer();
 
   const BYTE* GetReadPtr() const { return data; }
-  BYTE* GetWritePtr() { ++sequence_number; return data; }
+  BYTE* GetWritePtr() { InterlockedIncrement(&sequence_number); return data; }
   int GetDataSize() { return data_size; }
   int GetSequenceNumber() { return sequence_number; }
   int GetRefcount() { return refcount; }
@@ -303,40 +464,41 @@ class AVSValue;
 // is overloaded to recycle class instances.
 
 class VideoFrame {
-  int refcount;
+  volatile long refcount;
   VideoFrameBuffer* const vfb;
   const int offset, pitch, row_size, height, offsetU, offsetV, pitchUV;  // U&V offsets are from top of picture.
 
   friend class PVideoFrame;
-  void AddRef() { ++refcount; }
-  void Release() { if (refcount==1) --vfb->refcount; --refcount; }
+  void AddRef() { InterlockedIncrement(&refcount); }
+  void Release() { VideoFrameBuffer* vfb_local = vfb; if (!InterlockedDecrement(&refcount)) InterlockedDecrement(&vfb_local->refcount); }
 
-  friend class ScriptEnvironment;
   friend class Cache;
+  friend class CacheMT;
+  friend class ScriptEnvironment;
 
   VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height);
   VideoFrame(VideoFrameBuffer* _vfb, int _offset, int _pitch, int _row_size, int _height, int _offsetU, int _offsetV, int _pitchUV);
 
-  void* operator new (size_t size);
+  void* operator new(unsigned size);
 // TESTME: OFFSET U/V may be switched to what could be expected from AVI standard!
 public:
   int GetPitch() const { return pitch; }
   int GetPitch(int plane) const { switch (plane) {case PLANAR_U: case PLANAR_V: return pitchUV;} return pitch; }
   int GetRowSize() const { return row_size; }
-  int GetRowSize(int plane) const { 
+  __declspec(noinline) int GetRowSize(int plane) const {
     switch (plane) {
     case PLANAR_U: case PLANAR_V: if (pitchUV) return row_size>>1; else return 0;
-    case PLANAR_U_ALIGNED: case PLANAR_V_ALIGNED: 
-      if (pitchUV) { 
+    case PLANAR_U_ALIGNED: case PLANAR_V_ALIGNED:
+      if (pitchUV) {
         int r = ((row_size+FRAME_ALIGN-1)&(~(FRAME_ALIGN-1)) )>>1; // Aligned rowsize
-        if (r<=pitchUV) 
-          return r; 
-        return row_size>>1; 
+        if (r<=pitchUV)
+          return r;
+        return row_size>>1;
       } else return 0;
     case PLANAR_Y_ALIGNED:
       int r = (row_size+FRAME_ALIGN-1)&(~(FRAME_ALIGN-1)); // Aligned rowsize
-      if (r<=pitch) 
-        return r; 
+      if (r<=pitch)
+        return r;
       return row_size;
     }
     return row_size; }
@@ -349,6 +511,7 @@ public:
   int GetOffset(int plane) const { switch (plane) {case PLANAR_U: return offsetU;case PLANAR_V: return offsetV;default: return offset;}; }
 
   // in plugins use env->SubFrame()
+  //If you really want to use these remember to increase vfb->refcount before calling and decrement it afterwards.
   VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height) const;
   VideoFrame* Subframe(int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int pitchUV) const;
 
@@ -359,51 +522,58 @@ public:
   bool IsWritable() const { return (refcount == 1 && vfb->refcount == 1); }
 
   BYTE* GetWritePtr() const {
-    if (vfb->GetRefcount()>1) {
-      _ASSERT(FALSE);
-      //throw AvisynthError("Internal Error - refcount was more than one!");
+    //Vit-Start: Hideous hack in lieu of proper multithreading fixes in AviSynth. Used to assert false on refcount > 1, now give it a second then carry on regardless... =/
+    int count = 20;
+    while (vfb->GetRefcount()>1 && count-- > 0) {
+      Sleep(50);
     }
+    //Vit-End
     return IsWritable() ? (vfb->GetWritePtr() + offset) : 0;
   }
 
   BYTE* GetWritePtr(int plane) const {
     if (plane==PLANAR_Y) {
-      if (vfb->GetRefcount()>1) {
-        _ASSERT(FALSE);
-//        throw AvisynthError("Internal Error - refcount was more than one!");
+      //Vit-Start: Hideous hack in lieu of proper multithreading fixes in AviSynth. Used to assert false on refcount > 1, now give it a second then carry on regardless... =/
+      int count = 20;
+      while (vfb->GetRefcount()>1 && count-- > 0) {
+        Sleep(50);
       }
+      //Vit-End
       return IsWritable() ? vfb->GetWritePtr() + GetOffset(plane) : 0;
     }
     return vfb->data + GetOffset(plane);
   }
 
-  ~VideoFrame() { --vfb->refcount; }
+  ~VideoFrame() { VideoFrameBuffer* vfb_local = vfb; if (InterlockedDecrement(&refcount) >= 0) InterlockedDecrement(&vfb_local->refcount); }
 };
 
 enum {
   CACHE_NOTHING=0,
   CACHE_RANGE=1,
   CACHE_ALL=2,
+  CACHE_AUDIO=3,
+  CACHE_AUDIO_NONE=4,
+  CACHE_AUDIO_AUTO=5
  };
 
 // Base class for all filters.
 class IClip {
   friend class PClip;
   friend class AVSValue;
-  int refcnt;
-  void AddRef() { ++refcnt; }
-  void Release() { if (!--refcnt) delete this; }
+  volatile long refcnt;
+  void AddRef() { InterlockedIncrement(&refcnt); }
+  void Release() { if (!InterlockedDecrement(&refcnt)) delete this; }
 public:
   IClip() : refcnt(0) {}
 
   virtual int __stdcall GetVersion() { return AVISYNTH_INTERFACE_VERSION; }
-  
+
   virtual PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) = 0;
   virtual bool __stdcall GetParity(int n) = 0;  // return field parity if field_based, else parity of first field in frame
   virtual void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env) = 0;  // start and count are in samples
   virtual void __stdcall SetCacheHints(int cachehints,int frame_range) = 0 ;  // We do not pass cache requests upwards, only to the next filter.
   virtual const VideoInfo& __stdcall GetVideoInfo() = 0;
-  virtual __stdcall ~IClip() {}
+  virtual ~IClip() {}
 };
 
 
@@ -507,8 +677,8 @@ public:
 
   PClip AsClip() const { _ASSERTE(IsClip()); return IsClip()?clip:0; }
   bool AsBool() const { _ASSERTE(IsBool()); return boolean; }
-  int AsInt() const { _ASSERTE(IsInt()); return integer; }   
-//  int AsLong() const { _ASSERTE(IsLong()); return longlong; } 
+  int AsInt() const { _ASSERTE(IsInt()); return integer; }
+//  int AsLong() const { _ASSERTE(IsLong()); return longlong; }
   const char* AsString() const { _ASSERTE(IsString()); return IsString()?string:0; }
   double AsFloat() const { _ASSERTE(IsFloat()); return IsInt()?integer:floating_pt; }
 
@@ -518,6 +688,7 @@ public:
   const char* AsString(const char* def) const { _ASSERTE(IsString()||!Defined()); return IsString() ? string : def; }
 
   int ArraySize() const { _ASSERTE(IsArray()); return IsArray()?array_size:1; }
+
   const AVSValue& operator[](int index) const {
     _ASSERTE(IsArray() && index>=0 && index<array_size);
     return (IsArray() && index>=0 && index<array_size) ? array[index] : *this;
@@ -564,18 +735,12 @@ public:
 };
 
 
-class AvisynthError /* exception */ {
-public:
-  const char* const msg;
-  AvisynthError(const char* _msg) : msg(_msg) {}
-};
-
 
 
 
 /* Helper classes useful to plugin authors */
 
-class AlignPlanar : public GenericVideoFilter 
+class AlignPlanar : public GenericVideoFilter
 {
 public:
   AlignPlanar(PClip _clip);
@@ -585,7 +750,7 @@ public:
 
 
 
-class FillBorder : public GenericVideoFilter 
+class FillBorder : public GenericVideoFilter
 {
 public:
   FillBorder(PClip _clip);
@@ -595,7 +760,7 @@ public:
 
 
 
-class ConvertAudio : public GenericVideoFilter 
+class ConvertAudio : public GenericVideoFilter
 /**
   * Helper class to convert audio to any format
  **/
@@ -603,17 +768,26 @@ class ConvertAudio : public GenericVideoFilter
 public:
   ConvertAudio(PClip _clip, int prefered_format);
   void __stdcall GetAudio(void* buf, __int64 start, __int64 count, IScriptEnvironment* env);
+  void __stdcall SetCacheHints(int cachehints,int frame_range);  // We do pass cache requests upwards, to the cache!
 
   static PClip Create(PClip clip, int sample_type, int prefered_type);
   static AVSValue __cdecl Create_float(AVSValue args, void*, IScriptEnvironment*);
   static AVSValue __cdecl Create_32bit(AVSValue args, void*, IScriptEnvironment*);
+  static AVSValue __cdecl Create_24bit(AVSValue args, void*, IScriptEnvironment*);
   static AVSValue __cdecl Create_16bit(AVSValue args, void*, IScriptEnvironment*);
-  static AVSValue __cdecl Create_8bit(AVSValue args, void*, IScriptEnvironment*);
-  virtual ~ConvertAudio()
-  {if (tempbuffer_size) {delete[] tempbuffer;tempbuffer_size=0;}}
+  static AVSValue __cdecl Create_8bit (AVSValue args, void*, IScriptEnvironment*);
+  static AVSValue __cdecl Create_Any  (AVSValue args, void*, IScriptEnvironment*);
+  virtual ~ConvertAudio();
+
 private:
   void convertToFloat(char* inbuf, float* outbuf, char sample_type, int count);
+  void convertToFloat_3DN(char* inbuf, float* outbuf, char sample_type, int count);
+  void convertToFloat_SSE(char* inbuf, float* outbuf, char sample_type, int count);
+  void convertToFloat_SSE2(char* inbuf, float* outbuf, char sample_type, int count);
   void convertFromFloat(float* inbuf, void* outbuf, char sample_type, int count);
+  void convertFromFloat_3DN(float* inbuf, void* outbuf, char sample_type, int count);
+  void convertFromFloat_SSE(float* inbuf, void* outbuf, char sample_type, int count);
+  void convertFromFloat_SSE2(float* inbuf, void* outbuf, char sample_type, int count);
 
   __inline int Saturate_int8(float n);
   __inline short Saturate_int16(float n);
@@ -630,27 +804,30 @@ private:
 
 
 // For GetCPUFlags.  These are backwards-compatible with those in VirtualDub.
-enum {                    
+enum {
                     /* slowest CPU to support extension */
-  CPUF_FORCE			  = 0x01,   // N/A
-  CPUF_FPU			    = 0x02,   // 386/486DX
-  CPUF_MMX			    = 0x04,   // P55C, K6, PII
-  CPUF_INTEGER_SSE	= 0x08,		// PIII, Athlon
-  CPUF_SSE			    = 0x10,		// PIII, Athlon XP/MP
-  CPUF_SSE2			    = 0x20,		// PIV, Hammer
-  CPUF_3DNOW			  = 0x40,   // K6-2
-  CPUF_3DNOW_EXT		= 0x80,		// Athlon
-  CPUF_X86_64       = 0xA0,   // Hammer (note: equiv. to 3DNow + SSE2, which only Hammer
-                              //         will have anyway)
+  CPUF_FORCE        =  0x01,   //  N/A
+  CPUF_FPU          =  0x02,   //  386/486DX
+  CPUF_MMX          =  0x04,   //  P55C, K6, PII
+  CPUF_INTEGER_SSE  =  0x08,   //  PIII, Athlon
+  CPUF_SSE          =  0x10,   //  PIII, Athlon XP/MP
+  CPUF_SSE2         =  0x20,   //  PIV, Hammer
+  CPUF_3DNOW        =  0x40,   //  K6-2
+  CPUF_3DNOW_EXT    =  0x80,   //  Athlon
+  CPUF_X86_64       =  0xA0,   //  Hammer (note: equiv. to 3DNow + SSE2, which
+                               //          only Hammer will have anyway)
+  CPUF_SSE3         = 0x100,   //  PIV+, Hammer
 };
 #define MAX_INT 0x7fffffff
-#define MIN_INT 0x80000000
+#define MIN_INT -0x7fffffff  // ::FIXME:: research why this is not 0x80000000
 
 
+
+class IClipLocalStorage;
 
 class IScriptEnvironment {
 public:
-  virtual __stdcall ~IScriptEnvironment() {}
+  virtual ~IScriptEnvironment() {}
 
   virtual /*static*/ long __stdcall GetCPUFlags() = 0;
 
@@ -690,10 +867,28 @@ public:
 
   virtual PVideoFrame __stdcall Subframe(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height) = 0;
 
-	virtual int __stdcall SetMemoryMax(int mem) = 0;
+  virtual int __stdcall SetMemoryMax(int mem) = 0;
 
   virtual int __stdcall SetWorkingDir(const char * newdir) = 0;
 
+  virtual void* __stdcall ManageCache(int key, void* data) = 0;
+
+  enum PlanarChromaAlignmentMode {
+			PlanarChromaAlignmentOff,
+			PlanarChromaAlignmentOn,
+			PlanarChromaAlignmentTest };
+
+  virtual bool __stdcall PlanarChromaAlignment(PlanarChromaAlignmentMode key) = 0;
+
+  virtual PVideoFrame __stdcall SubframePlanar(PVideoFrame src, int rel_offset, int new_pitch, int new_row_size, int new_height, int rel_offsetU, int rel_offsetV, int new_pitchUV) = 0;
+
+  virtual void __stdcall SetMTMode(int mode,int threads,bool temporary)=0;
+  virtual int __stdcall  GetMTMode(bool return_nthreads)=0;
+
+  virtual IClipLocalStorage* __stdcall AllocClipLocalStorage()=0;
+
+  virtual void __stdcall SaveClipLocalStorage()=0;
+  virtual void __stdcall RestoreClipLocalStorage()=0;
 };
 
 
