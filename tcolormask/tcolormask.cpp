@@ -188,7 +188,7 @@ void TColorMask::processSse2(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *s
             auto result_u = _mm_setzero_si128();
             auto result_v = _mm_setzero_si128();
 
-            auto srcY_v = _mm_load_si128(reinterpret_cast<const __m128i*>(srcY_ptr+x*16));
+            auto srcY_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcY_ptr+x*16));
             auto srcU_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcU_ptr+x*8));
             srcU_v = _mm_unpacklo_epi8(srcU_v, srcU_v);
             auto srcV_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(srcV_ptr+x*8));
@@ -229,7 +229,7 @@ void TColorMask::processSse2(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *s
             }
             result_y = _mm_and_si128(result_y, result_u);
             result_y = _mm_and_si128(result_y, result_v);
-            _mm_store_si128(reinterpret_cast<__m128i*>(dstY_ptr+x*16), result_y);
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(dstY_ptr+x*16), result_y);
         }
         srcY_ptr += src_pitch_y;
         if (y % 2 == 1) {
