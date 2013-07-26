@@ -24,14 +24,14 @@ int round(float d) {
     return static_cast<int>(d + 0.5f);
 }
 
-template<int subsampling>
+template<int subsamplingX, int subsamplingY>
 void processLut(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *pSrcU, int dstPitchY, int srcPitchY, int srcPitchUV, int width, int height, BYTE *lutY, BYTE *lutU, BYTE *lutV) {
     for(int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            pDstY[x] = lutY[pSrcY[x]] & lutU[pSrcU[x/subsampling]] & lutV[pSrcV[x/subsampling]];
+            pDstY[x] = lutY[pSrcY[x]] & lutU[pSrcU[x/subsamplingX]] & lutV[pSrcV[x/subsamplingX]];
         }
         pSrcY += srcPitchY;
-        if (y % subsampling == (subsampling-1)) {
+        if (y % subsamplingY == (subsamplingY-1)) {
             pSrcU += srcPitchUV;
             pSrcV += srcPitchUV;
         }
@@ -39,7 +39,7 @@ void processLut(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *p
     }
 }
 
-template<int subsampling>
+template<int subsamplingX, int subsamplingY>
 void processSse2(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *pSrcU, int dstPitchY, 
                  int srcPitchY, int srcPitchUV, int width, int height, const vector<YUVPixel>& colors, int vectorTolerance, int halfVectorTolerance) {
     for(int y = 0; y < height; ++y) {
@@ -50,10 +50,10 @@ void processSse2(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *
 
             auto srcY_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pSrcY+x));
             __m128i srcU_v, srcV_v;
-            if (subsampling == 2) {
-                srcU_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(pSrcU+x/2));
+            if (subsamplingX == 2) {
+                srcU_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(pSrcU+x/subsamplingX));
                 srcU_v = _mm_unpacklo_epi8(srcU_v, srcU_v);
-                srcV_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(pSrcV+x/2));
+                srcV_v = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(pSrcV+x/subsamplingX));
                 srcV_v = _mm_unpacklo_epi8(srcV_v, srcV_v);
             } else {
                 srcU_v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pSrcU+x));
@@ -98,7 +98,7 @@ void processSse2(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *
             _mm_storeu_si128(reinterpret_cast<__m128i*>(pDstY+x), result_y);
         }
         pSrcY += srcPitchY;
-        if (y % subsampling == (subsampling-1)) {
+        if (y % subsamplingY == (subsamplingY-1)) {
             pSrcU += srcPitchUV;
             pSrcV += srcPitchUV;
         }
@@ -107,10 +107,12 @@ void processSse2(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *
 }
 
 
-auto lutYv12 = &processLut<2>;
-auto lutYv24 = &processLut<1>;
-auto sse2Yv12 = &processSse2<2>;
-auto sse2Yv24 = &processSse2<1>;
+auto lutYv12 = &processLut<2, 2>;
+auto lutYv24 = &processLut<1, 1>;
+auto lutYv16 = &processLut<2, 1>;
+auto sse2Yv12 = &processSse2<2, 2>;
+auto sse2Yv24 = &processSse2<1, 1>;
+auto sse2Yv16 = &processSse2<2, 1>;
 
 class TColorMask : public GenericVideoFilter {
 public:
@@ -129,7 +131,7 @@ private:
     bool grayscale_;
     bool mt_;
     int prefer_lut_thresh_;
-    int subsampling_;
+    int subsamplingY_;
     unsigned int vector_tolerance_;
     unsigned int vector_half_tolerance_;
 
@@ -144,15 +146,19 @@ private:
 TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env) 
     : GenericVideoFilter(child), tolerance_(tolerance), grayscale_(grayscale), prefer_lut_thresh_(lutthr), mt_(mt), vector_tolerance_(0), vector_half_tolerance_(0) {
     if (vi.IsYV24()) {
-        subsampling_ = 1;
+        subsamplingY_ = 1;
         lutFunction_ = lutYv24;
         sse2Function_ = sse2Yv24;
     } else if (vi.IsYV12()) {
-        subsampling_ = 2;
+        subsamplingY_ = 2;
         lutFunction_ = lutYv12;
         sse2Function_ = sse2Yv12;
+    } else if (vi.IsYV16()) {
+        subsamplingY_ = 1;
+        lutFunction_ = lutYv16;
+        sse2Function_ = sse2Yv16;
     } else {
-        env->ThrowError("Only YV12 and YV24 are supported!");
+        env->ThrowError("Only YV12, YV16 and YV24 are supported!");
     }
     float kR = bt601 ? 0.299f : 0.2126f;
     float kB = bt601 ? 0.114f : 0.0722f;
@@ -234,8 +240,8 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
        });
        process(dstY_ptr + (dst_pitch_y*height/2), 
            srcY_ptr + (src_pitch_y*height/2), 
-           srcV_ptr + (src_pitch_uv*height/(2*subsampling_)), 
-           srcU_ptr + (src_pitch_uv*height/(2*subsampling_)), 
+           srcV_ptr + (src_pitch_uv*height/(2*subsamplingY_)), 
+           srcU_ptr + (src_pitch_uv*height/(2*subsamplingY_)), 
            dst_pitch_y, 
            src_pitch_y, 
            src_pitch_uv, 
@@ -300,7 +306,11 @@ AVSValue __cdecl CreateTColorMask(AVSValue args, void*, IScriptEnvironment* env)
         args[GRAYSCALE].AsBool(false), args[LUTTHR].AsInt(9), args[MT].AsBool(true), env);
 }
 
-extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit2(IScriptEnvironment* env) {
+const AVS_Linkage *AVS_linkage = nullptr;
+
+extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors) {
+    AVS_linkage = vectors;
+
     env->AddFunction("tcolormask", "c[colors]s[tolerance]i[bt601]b[gray]b[lutthr]i[mt]b", CreateTColorMask, 0);
     return "Why are you looking at this?";
 }
