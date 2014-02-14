@@ -1,6 +1,7 @@
 #include <vector>
 #include <regex>
 #include <future>
+#include <stdint.h>
 #include <Windows.h>
 #pragma warning(disable: 4512 4244 4100)
 #include "avisynth.h"
@@ -10,13 +11,13 @@
 using namespace std;
 
 struct YUVPixel {
-    BYTE Y;
-    BYTE U;
-    BYTE V;
+    uint8_t Y;
+    uint8_t U;
+    uint8_t V;
 
-    unsigned int vector_y;
-    unsigned int vector_u;
-    unsigned int vector_v;
+    uint32_t vector_y;
+    uint32_t vector_u;
+    uint32_t vector_v;
 };
 
 
@@ -25,7 +26,7 @@ int round(float d) {
 }
 
 template<int subsamplingX, int subsamplingY>
-void processLut(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *pSrcU, int dstPitchY, int srcPitchY, int srcPitchUV, int width, int height, BYTE *lutY, BYTE *lutU, BYTE *lutV) {
+void processLut(uint8_t *pDstY, const uint8_t *pSrcY, const uint8_t *pSrcV, const uint8_t *pSrcU, int dstPitchY, int srcPitchY, int srcPitchUV, int width, int height, uint8_t *lutY, uint8_t *lutU, uint8_t *lutV) {
     for(int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             pDstY[x] = lutY[pSrcY[x]] & lutU[pSrcU[x/subsamplingX]] & lutV[pSrcV[x/subsamplingX]];
@@ -40,7 +41,7 @@ void processLut(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *p
 }
 
 template<int subsamplingX, int subsamplingY>
-void processSse2(BYTE *pDstY, const BYTE *pSrcY, const BYTE *pSrcV, const BYTE *pSrcU, int dstPitchY, 
+void processSse2(uint8_t *pDstY, const uint8_t *pSrcY, const uint8_t *pSrcV, const uint8_t *pSrcU, int dstPitchY, 
                  int srcPitchY, int srcPitchUV, int width, int height, const vector<YUVPixel>& colors, int vectorTolerance, int halfVectorTolerance) {
     for(int y = 0; y < height; ++y) {
         for (int x = 0; x < width; x+=16) {
@@ -119,12 +120,11 @@ public:
     TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env);
     PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
-
 private:
     void buildLuts();
 
 
-    void process(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
+    void process(uint8_t *dstY_ptr, const uint8_t *srcY_ptr, const uint8_t *srcV_ptr, const uint8_t *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
 
     vector<YUVPixel> colors_;
     int tolerance_;
@@ -132,12 +132,12 @@ private:
     bool mt_;
     int prefer_lut_thresh_;
     int subsamplingY_;
-    unsigned int vector_tolerance_;
-    unsigned int vector_half_tolerance_;
+    uint32_t vector_tolerance_;
+    uint32_t vector_half_tolerance_;
 
-    BYTE lut_y[256];
-    BYTE lut_u[256];
-    BYTE lut_v[256];
+    uint8_t lut_y[256];
+    uint8_t lut_u[256];
+    uint8_t lut_v[256];
     
     decltype(lutYv12) lutFunction_;
     decltype(sse2Yv12) sse2Function_;
@@ -195,9 +195,9 @@ TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt60
 
 void TColorMask::buildLuts() {
     for (int i = 0; i < 256; ++i) {
-        BYTE val_y = 0;
-        BYTE val_u = 0;
-        BYTE val_v = 0;
+        uint8_t val_y = 0;
+        uint8_t val_u = 0;
+        uint8_t val_v = 0;
         for (auto &color: colors_) {
             val_y |= ((abs(i - color.Y) < tolerance_) ? 255 : 0);
             val_u |= ((abs(i - color.U) < (tolerance_ / 2)) ? 255 : 0);
@@ -216,13 +216,13 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
    int width = src->GetRowSize(PLANAR_Y);
    int height = src->GetHeight(PLANAR_Y);
 
-   const BYTE *srcY_ptr = src->GetReadPtr(PLANAR_Y);
-   const BYTE *srcU_ptr = src->GetReadPtr(PLANAR_U);
-   const BYTE *srcV_ptr = src->GetReadPtr(PLANAR_V);
+   const uint8_t *srcY_ptr = src->GetReadPtr(PLANAR_Y);
+   const uint8_t *srcU_ptr = src->GetReadPtr(PLANAR_U);
+   const uint8_t *srcV_ptr = src->GetReadPtr(PLANAR_V);
    int src_pitch_y = src->GetPitch(PLANAR_Y);
    int src_pitch_uv = src->GetPitch(PLANAR_U);
    
-   BYTE *dstY_ptr = dst->GetWritePtr(PLANAR_Y);
+   uint8_t *dstY_ptr = dst->GetWritePtr(PLANAR_Y);
    int dst_pitch_y = dst->GetPitch(PLANAR_Y);
    
    if (mt_) {
@@ -259,7 +259,7 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
    return dst;
 }
 
-void TColorMask::process(BYTE *dstY_ptr, const BYTE *srcY_ptr, const BYTE *srcV_ptr, const BYTE *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height) {
+void TColorMask::process(uint8_t *dstY_ptr, const uint8_t *srcY_ptr, const uint8_t *srcV_ptr, const uint8_t *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height) {
     if (colors_.size() > prefer_lut_thresh_) {
         lutFunction_(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width, height, lut_y, lut_u, lut_v);
         return;
