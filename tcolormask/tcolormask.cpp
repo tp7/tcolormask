@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <Windows.h>
 #pragma warning(disable: 4512 4244 4100)
-#include "avisynth.h"
+#include <avisynth.h>
 #pragma warning(default: 4512 4244 4100)
 #include <xmmintrin.h>
 
@@ -119,10 +119,13 @@ class TColorMask : public GenericVideoFilter {
 public:
     TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env);
     PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
+    
+    int __stdcall SetCacheHints(int cachehints, int frame_range) override {
+        return cachehints == CACHE_GET_MTMODE ? MT_NICE_FILTER : 0;
+    }
 
 private:
     void buildLuts();
-
 
     void process(uint8_t *dstY_ptr, const uint8_t *srcY_ptr, const uint8_t *srcV_ptr, const uint8_t *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
 
@@ -303,7 +306,7 @@ AVSValue __cdecl CreateTColorMask(AVSValue args, void*, IScriptEnvironment* env)
     }
     
     return new TColorMask(args[CLIP].AsClip(), colors, args[TOLERANCE].AsInt(10), args[BT601].AsBool(false), 
-        args[GRAYSCALE].AsBool(false), args[LUTTHR].AsInt(9), args[MT].AsBool(true), env);
+        args[GRAYSCALE].AsBool(false), args[LUTTHR].AsInt(9), args[MT].AsBool(false), env);
 }
 
 const AVS_Linkage *AVS_linkage = nullptr;
