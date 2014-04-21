@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <Windows.h>
 #pragma warning(disable: 4512 4244 4100)
-#include "avisynth.h"
+#include <avisynth.h>
 #pragma warning(default: 4512 4244 4100)
 #include <xmmintrin.h>
 
