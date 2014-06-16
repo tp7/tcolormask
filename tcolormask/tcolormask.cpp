@@ -132,6 +132,7 @@ private:
     bool mt_;
     int prefer_lut_thresh_;
     int subsamplingY_;
+    int subsamplingX_;
     uint32_t vector_tolerance_;
     uint32_t vector_half_tolerance_;
 
@@ -147,14 +148,17 @@ TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt60
     : GenericVideoFilter(child), tolerance_(tolerance), grayscale_(grayscale), prefer_lut_thresh_(lutthr), mt_(mt), vector_tolerance_(0), vector_half_tolerance_(0) {
     if (vi.IsYV24()) {
         subsamplingY_ = 1;
+        subsamplingX_ = 1;
         lutFunction_ = lutYv24;
         sse2Function_ = sse2Yv24;
     } else if (vi.IsYV12()) {
         subsamplingY_ = 2;
+        subsamplingX_ = 2;
         lutFunction_ = lutYv12;
         sse2Function_ = sse2Yv12;
     } else if (vi.IsYV16()) {
         subsamplingY_ = 1;
+        subsamplingX_ = 2;
         lutFunction_ = lutYv16;
         sse2Function_ = sse2Yv16;
     } else {
@@ -268,7 +272,11 @@ void TColorMask::process(uint8_t *dstY_ptr, const uint8_t *srcY_ptr, const uint8
 
     sse2Function_(dstY_ptr, srcY_ptr, srcV_ptr, srcU_ptr, dst_pitch_y, src_pitch_y, src_pitch_uv, width - border , height, colors_, vector_tolerance_, vector_half_tolerance_);
     if (border != 0) {
-        lutFunction_(dstY_ptr + width - border, srcY_ptr + width - border, srcV_ptr + width - border, srcU_ptr + width - border, dst_pitch_y, src_pitch_y, src_pitch_uv, border, height, lut_y, lut_u, lut_v);
+        lutFunction_(dstY_ptr + width - border, 
+            srcY_ptr + (width - border) / subsamplingX_, 
+            srcV_ptr + (width - border) / subsamplingX_, 
+            srcU_ptr + (width - border) / subsamplingX_, 
+            dst_pitch_y, src_pitch_y, src_pitch_uv, border, height, lut_y, lut_u, lut_v);
     }
 }
 
