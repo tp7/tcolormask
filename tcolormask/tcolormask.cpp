@@ -8,8 +8,6 @@
 #pragma warning(default: 4512 4244 4100)
 #include <xmmintrin.h>
 
-using namespace std;
-
 struct YUVPixel {
     uint8_t Y;
     uint8_t U;
@@ -21,7 +19,7 @@ struct YUVPixel {
 };
 
 
-int round(float d) {
+inline int depfree_round(float d) {
     return static_cast<int>(d + 0.5f);
 }
 
@@ -42,7 +40,8 @@ void processLut(uint8_t *pDstY, const uint8_t *pSrcY, const uint8_t *pSrcV, cons
 
 template<int subsamplingX, int subsamplingY>
 void processSse2(uint8_t *pDstY, const uint8_t *pSrcY, const uint8_t *pSrcV, const uint8_t *pSrcU, int dstPitchY, 
-                 int srcPitchY, int srcPitchUV, int width, int height, const vector<YUVPixel>& colors, int vectorTolerance, int halfVectorTolerance) {
+    int srcPitchY, int srcPitchUV, int width, int height, const std::vector<YUVPixel>& colors, int vectorTolerance, int halfVectorTolerance)
+{
     for(int y = 0; y < height; ++y) {
         for (int x = 0; x < width; x+=16) {
             auto result_y = _mm_setzero_si128();
@@ -117,7 +116,7 @@ auto sse2Yv16 = &processSse2<2, 1>;
 
 class TColorMask : public GenericVideoFilter {
 public:
-    TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env);
+    TColorMask(PClip child, std::vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env);
     PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env);
 
 private:
@@ -126,7 +125,7 @@ private:
 
     void process(uint8_t *dstY_ptr, const uint8_t *srcY_ptr, const uint8_t *srcV_ptr, const uint8_t *srcU_ptr, int dst_pitch_y, int src_pitch_y, int src_pitch_uv, int width, int height);
 
-    vector<YUVPixel> colors_;
+    std::vector<YUVPixel> colors_;
     int tolerance_;
     bool grayscale_;
     bool mt_;
@@ -144,7 +143,7 @@ private:
     decltype(sse2Yv12) sse2Function_;
 };
 
-TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env) 
+TColorMask::TColorMask(PClip child, std::vector<int> colors, int tolerance, bool bt601, bool grayscale, int lutthr, bool mt, IScriptEnvironment* env)
     : GenericVideoFilter(child), tolerance_(tolerance), grayscale_(grayscale), prefer_lut_thresh_(lutthr), mt_(mt), vector_tolerance_(0), vector_half_tolerance_(0) {
     if (vi.IsYV24()) {
         subsamplingY_ = 1;
@@ -175,9 +174,9 @@ TColorMask::TColorMask(PClip child, vector<int> colors, int tolerance, bool bt60
         float b = static_cast<float>(color & 0xFF) / 255.0f;
 
         float y = kR*r + (1-kR-kB)*g + kB*b;
-        p.U = 128 + round(112.0f*(b-y)/(1-kB));
-        p.V = 128 + round(112.0f*(r-y)/(1-kR));
-        p.Y = 16 + round(219.0f*y);
+        p.U = 128 + depfree_round(112.0f*(b-y)/(1-kB));
+        p.V = 128 + depfree_round(112.0f*(r-y)/(1-kR));
+        p.Y = 16 + depfree_round(219.0f*y);
         for (int i = 0; i < 4; i++) {
             p.vector_y |= p.Y << (8*i);
             p.vector_u |= p.U << (8*i);
@@ -231,7 +230,7 @@ PVideoFrame TColorMask::GetFrame(int n, IScriptEnvironment* env) {
    
    if (mt_) {
        //async seems to be threadpool'ed on windows, creating threads is less efficient
-       auto thread2 = std::async(launch::async, [=] { 
+       auto thread2 = std::async(std::launch::async, [=] {
            process(dstY_ptr, 
                srcY_ptr, 
                srcV_ptr, 
@@ -280,7 +279,8 @@ void TColorMask::process(uint8_t *dstY_ptr, const uint8_t *srcY_ptr, const uint8
     }
 }
 
-int avisynthStringToInt(const string &str) {
+int avisynthStringToInt(const std::string &str)
+{
     if (str[0] == '$') {
         auto substr = str.substr(1, str.length());
         return strtol(substr.c_str(), 0, 16);
@@ -292,16 +292,16 @@ AVSValue __cdecl CreateTColorMask(AVSValue args, void*, IScriptEnvironment* env)
 {
     enum { CLIP, COLORS, TOLERANCE, BT601, GRAYSCALE, LUTTHR, MT };
 
-    string str = args[COLORS].AsString("");
+    std::string str = args[COLORS].AsString("");
     
     std::regex e ("(/\\*.*\\*/|//.*$)");   //comments
-    str = regex_replace(str, e, "");
+    str = std::regex_replace(str, e, "");
 
-    vector<int> colors;
-    regex rgx("(\\$?[\\da-fA-F]+)");
+    std::vector<int> colors;
+    std::regex rgx("(\\$?[\\da-fA-F]+)");
 
-    sregex_token_iterator iter(str.cbegin(), str.cend(), rgx, 1);
-    sregex_token_iterator end;
+    std::sregex_token_iterator iter(str.cbegin(), str.cend(), rgx, 1);
+    std::sregex_token_iterator end;
     for( ; iter != end; ++iter ) {
         try {
             colors.push_back(avisynthStringToInt(iter->str()));
